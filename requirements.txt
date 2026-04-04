@@ -1,6 +1,6 @@
-streamlit>=1.31.0
+streamlit
 librosa
-streamlit-mic-recorder>=0.0.20
+streamlit-mic-recorder
 soundfile
 matplotlib
 numpy

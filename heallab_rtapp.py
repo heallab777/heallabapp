@@ -20,32 +20,23 @@ if 'sensitivity' not in st.session_state: st.session_state.sensitivity = 75
 if 'v_bias' not in st.session_state: st.session_state.v_bias = 0
 if 'show_settings' not in st.session_state: st.session_state.show_settings = False
 
-# --- 2. UI 注入 (Dark Mode 保持) ---
+# --- 2. UI 注入 (Dark Mode) ---
 st.markdown("""
     <style>
     .stApp { background-color: #0d1117 !important; }
     h1, h2, h3, p, span, label { color: #ffffff !important; }
-    
-    /* 側邊欄/彈出面板深色化 */
     .settings-box {
         background: rgba(26, 30, 54, 0.98);
         border: 1px solid rgba(212, 180, 112, 0.5);
         border-radius: 20px; padding: 25px; margin-bottom: 25px;
     }
-    
-    /* 按鈕深灰色預設 */
     .stButton > button, .stDownloadButton > button {
         background-color: #262730 !important;
         color: #d4b470 !important;
         border: 1px solid rgba(212, 180, 112, 0.4) !important;
         border-radius: 12px !important;
     }
-    
-    /* 修正播放器在手機上的外觀 */
-    audio { 
-        filter: invert(100%) brightness(1.8) hue-rotate(180deg); 
-        width: 100%; 
-    }
+    audio { filter: invert(100%) brightness(1.8) hue-rotate(180deg); width: 100%; }
     #MainMenu, footer, header {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
@@ -64,7 +55,7 @@ if st.session_state.show_settings:
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 4. 運算函數 ---
+# --- 4. 運算與圖表函數 ---
 def map_to_russell(energy, centroid, sens, bias):
     arousal = np.clip((energy * sens) - 0.6, -1, 1) 
     valence = np.clip(((2800 + bias) - centroid) / 2000, -1, 1)
@@ -75,7 +66,7 @@ def draw_russell_chart(v, a):
     fig.add_trace(go.Scatter(
         x=[v], y=[a], mode='markers+text',
         marker=dict(color='#ff4b4b', size=25, line=dict(color='white', width=3), symbol="diamond"),
-        text=["當前狀態"], textposition="top center"
+        text=["當下狀態"], textposition="top center"
     ))
     fig.update_layout(
         template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
@@ -108,14 +99,14 @@ with tab2:
 
 if audio_data:
     try:
-        # 使用 pydub 確保格式正確，並導出為標準 wav
+        # 第一步：封裝原始數據
         audio_io = io.BytesIO(audio_data)
         audio_seg = AudioSegment.from_file(audio_io)
         
-        # 導出為標準 WAV 格式，這能確保 Metadata 完整，讓播放器顯示時間
+        # 第二步：導出為標準 WAV 並【關鍵：強制倒帶】
         wav_buffer = io.BytesIO()
         audio_seg.export(wav_buffer, format="wav")
-        wav_buffer.seek(0)
+        wav_buffer.seek(0) # 第一次倒帶：供 Librosa 分析
         
         # 數據分析
         y, sr = librosa.load(wav_buffer)
@@ -123,8 +114,8 @@ if audio_data:
         centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
         v, a = map_to_russell(energy, centroid, st.session_state.sensitivity, st.session_state.v_bias)
 
-        # --- 顯示播放器：回到原生方式，但強制指定格式 ---
-        wav_buffer.seek(0)
+        # 第三步：顯示播放器前再次【關鍵：強制倒帶】
+        wav_buffer.seek(0) 
         st.audio(wav_buffer, format="audio/wav")
 
         c1, c2 = st.columns([1.5, 1])
@@ -138,9 +129,17 @@ if audio_data:
             else: st.info("🍊 **建議：甜橙**")
             
             st.divider()
-            st.download_button("💾 保存樣本", data=audio_data, file_name=f"heal_{int(time.time())}.wav")
+            
+            # 第四步：下載按鈕使用已經倒帶完成的 wav_buffer 數據
+            final_data = wav_buffer.getvalue()
+            st.download_button(
+                label="💾 保存樣本 (WAV)",
+                data=final_data,
+                file_name=f"heallab_{int(time.time())}.wav",
+                mime="audio/wav"
+            )
 
     except Exception as e:
         st.error(f"分析異常：{e}")
 
-st.caption("© 2026 Heal Lab | v5.5 Metadata Fixed")
+st.caption("© 2026 Heal Lab | v5.6 Buffer Persistence Fixed")

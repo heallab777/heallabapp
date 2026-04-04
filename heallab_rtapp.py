@@ -6,7 +6,6 @@ import numpy as np
 import plotly.graph_objects as go
 from pydub import AudioSegment
 import streamlit.components.v1 as components
-import base64
 import time
 
 # --- 1. 網頁配置 ---
@@ -16,58 +15,44 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 初始化設定與數據鎖
+# 初始化設定
 if 'sensitivity' not in st.session_state: st.session_state.sensitivity = 75
 if 'v_bias' not in st.session_state: st.session_state.v_bias = 0
 if 'show_settings' not in st.session_state: st.session_state.show_settings = False
-if 'audio_key' not in st.session_state: st.session_state.audio_key = str(time.time())
 
-# --- 2. 旗艦版 UI 注入 ---
+# --- 2. UI 注入 (Dark Mode 保持) ---
 st.markdown("""
     <style>
-    #splash-screen {
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: radial-gradient(circle at center, #1a1e36 0%, #0d1117 100%);
-        z-index: 9999; display: flex; justify-content: center; align-items: center;
-        animation: fadeOut 2.5s forwards; pointer-events: none;
-    }
-    .splash-logo { color: #d4b470; font-size: 3em; font-weight: 900; letter-spacing: 8px; }
-    @keyframes fadeOut { 0% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
     .stApp { background-color: #0d1117 !important; }
     h1, h2, h3, p, span, label { color: #ffffff !important; }
     
+    /* 側邊欄/彈出面板深色化 */
     .settings-box {
         background: rgba(26, 30, 54, 0.98);
         border: 1px solid rgba(212, 180, 112, 0.5);
         border-radius: 20px; padding: 25px; margin-bottom: 25px;
     }
     
+    /* 按鈕深灰色預設 */
     .stButton > button, .stDownloadButton > button {
         background-color: #262730 !important;
         color: #d4b470 !important;
         border: 1px solid rgba(212, 180, 112, 0.4) !important;
         border-radius: 12px !important;
-        font-weight: 600 !important; width: 100% !important;
-    }
-    .stButton > button:hover { background-color: #d4b470 !important; color: #0d1117 !important; }
-
-    /* 手機播放器修正：增加亮點與操作感 */
-    audio { 
-        filter: invert(100%) brightness(1.8) hue-rotate(180deg); 
-        width: 100%; height: 50px;
-        background: #000; border-radius: 25px;
     }
     
+    /* 修正播放器在手機上的外觀 */
+    audio { 
+        filter: invert(100%) brightness(1.8) hue-rotate(180deg); 
+        width: 100%; 
+    }
     #MainMenu, footer, header {visibility: hidden;}
     </style>
-    <div id="splash-screen"><div class="splash-logo">HEAL LAB</div></div>
     """, unsafe_allow_html=True)
 
 # --- 3. 浮動面板 ---
-c_set, _ = st.columns([1, 3])
-with c_set:
-    if st.button("⚙️ 參數校準 (Calibration)"):
-        st.session_state.show_settings = not st.session_state.show_settings
+if st.button("⚙️ 參數校準 (Calibration)"):
+    st.session_state.show_settings = not st.session_state.show_settings
 
 if st.session_state.show_settings:
     with st.container():
@@ -90,103 +75,72 @@ def draw_russell_chart(v, a):
     fig.add_trace(go.Scatter(
         x=[v], y=[a], mode='markers+text',
         marker=dict(color='#ff4b4b', size=25, line=dict(color='white', width=3), symbol="diamond"),
-        text=["當前狀態"], textposition="top center",
-        textfont=dict(color="white", size=14)
+        text=["當前狀態"], textposition="top center"
     ))
     fig.update_layout(
         template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(range=[-1.1, 1.1], zeroline=True, gridcolor='rgba(255,255,255,0.1)'),
-        yaxis=dict(range=[-1.1, 1.1], zeroline=True, gridcolor='rgba(255,255,255,0.1)'),
-        margin=dict(l=10, r=10, t=10, b=10), height=400, showlegend=False,
+        xaxis=dict(range=[-1.1, 1.1], zeroline=True),
+        yaxis=dict(range=[-1.1, 1.1], zeroline=True),
         shapes=[
             dict(type="rect", x0=-1.1, y0=0, x1=0, y1=1.1, fillcolor="rgba(150, 100, 255, 0.1)"),
             dict(type="rect", x0=0, y0=0, x1=1.1, y1=1.1, fillcolor="rgba(100, 255, 100, 0.1)"),
             dict(type="rect", x0=-1.1, y0=-1.1, x1=0, y1=0, fillcolor="rgba(255, 150, 50, 0.1)"),
             dict(type="rect", x0=0, y0=-1.1, x1=1.1, y1=0, fillcolor="rgba(210, 180, 140, 0.1)")
-        ]
+        ],
+        margin=dict(l=10, r=10, t=10, b=10), height=400, showlegend=False
     )
     return fig
 
 # --- 5. 主流程 ---
 st.title("🌿 HEAL LAB | 導航儀")
-
 tab1, tab2 = st.tabs(["🎤 即時感測", "📁 匯入分析"])
 
-audio_bytes = None
-
+audio_data = None
 with tab1:
-    # 關鍵：這裡 key 必須固定，但透過重新賦值來更新顯示
-    recorded_audio = mic_recorder(
-        start_prompt="啟動感測 🎤", 
-        stop_prompt="停止並分析 ⏹️", 
-        key='mobile_recorder'
-    )
-    if recorded_audio:
-        audio_bytes = recorded_audio['bytes']
+    rec = mic_recorder(start_prompt="啟動感測 🎤", stop_prompt="停止並分析 ⏹️", key='fixed_recorder')
+    if rec:
+        audio_data = rec['bytes']
 
 with tab2:
     up = st.file_uploader("匯入檔案", type=["mp3", "wav"])
     if up:
-        audio_bytes = up.read()
+        audio_data = up.read()
 
-# --- 6. 核心顯示區 ---
-if audio_bytes:
+if audio_data:
     try:
-        with st.spinner('正在解鎖音訊流...'):
-            # 強制轉換格式
-            audio_io = io.BytesIO(audio_bytes)
-            audio_seg = AudioSegment.from_file(audio_io)
-            wav_io = io.BytesIO()
-            audio_seg.export(wav_io, format="wav")
-            wav_io.seek(0)
-            
-            # 數據分析
-            y, sr = librosa.load(wav_io)
-            duration = librosa.get_duration(y=y, sr=sr)
-            
-            if duration < 0.1:
-                st.error("⚠️ 錄音數據過短或失效。請確認手機已授權麥克風權限。")
-            else:
-                energy = np.mean(librosa.feature.rms(y=y))
-                centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
-                v, a = map_to_russell(energy, centroid, st.session_state.sensitivity, st.session_state.v_bias)
+        # 使用 pydub 確保格式正確，並導出為標準 wav
+        audio_io = io.BytesIO(audio_data)
+        audio_seg = AudioSegment.from_file(audio_io)
+        
+        # 導出為標準 WAV 格式，這能確保 Metadata 完整，讓播放器顯示時間
+        wav_buffer = io.BytesIO()
+        audio_seg.export(wav_buffer, format="wav")
+        wav_buffer.seek(0)
+        
+        # 數據分析
+        y, sr = librosa.load(wav_buffer)
+        energy = np.mean(librosa.feature.rms(y=y))
+        centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
+        v, a = map_to_russell(energy, centroid, st.session_state.sensitivity, st.session_state.v_bias)
 
-                # --- 手機播放器最終補丁 (Base64 + JS 強制載入) ---
-                wav_io.seek(0)
-                b64_data = base64.b64encode(wav_io.read()).decode()
-                ts = int(time.time())
-                
-                audio_player_html = f"""
-                <div style="background: rgba(212,180,112,0.1); padding: 15px; border-radius: 15px; border: 1px solid rgba(212,180,112,0.3); margin: 15px 0;">
-                    <p style="color: #d4b470; font-size: 0.85em; margin-bottom: 8px;">🔊 感測樣本 (長度: {duration:.1f}s)</p>
-                    <audio id="audio_player_{ts}" controls preload="auto" style="width: 100%;">
-                        <source src="data:audio/wav;base64,{b64_data}" type="audio/wav">
-                    </audio>
-                </div>
-                <script>
-                    var p = document.getElementById('audio_player_{ts}');
-                    p.onloadedmetadata = function() {{ console.log('Metadata Loaded'); }};
-                    p.load(); // 強制觸發瀏覽器讀取數據
-                </script>
-                """
-                st.markdown(audio_player_html, unsafe_allow_html=True)
+        # --- 顯示播放器：回到原生方式，但強制指定格式 ---
+        wav_buffer.seek(0)
+        st.audio(wav_buffer, format="audio/wav")
 
-                c1, c2 = st.columns([1.5, 1])
-                with c1:
-                    st.plotly_chart(draw_russell_chart(v, a), use_container_width=True)
-                with c2:
-                    st.subheader("🔍 診斷報告")
-                    if a > 0 and v < 0: st.warning("🌿 **建議：薰衣草**")
-                    elif a > 0 and v > 0: st.success("🍃 **建議：薄荷**")
-                    elif a < 0 and v > 0: st.info("🪵 **建議：檀香**")
-                    else: st.info("🍊 **建議：甜橙**")
-                    
-                    st.divider()
-                    st.download_button("💾 保存樣本", data=audio_bytes, file_name=f"heal_{ts}.wav")
+        c1, c2 = st.columns([1.5, 1])
+        with c1:
+            st.plotly_chart(draw_russell_chart(v, a), use_container_width=True)
+        with c2:
+            st.subheader("🔍 診斷報告")
+            if a > 0 and v < 0: st.warning("🌿 **建議：薰衣草**")
+            elif a > 0 and v > 0: st.success("🍃 **建議：薄荷**")
+            elif a < 0 and v > 0: st.info("🪵 **建議：檀香**")
+            else: st.info("🍊 **建議：甜橙**")
+            
+            st.divider()
+            st.download_button("💾 保存樣本", data=audio_data, file_name=f"heal_{int(time.time())}.wav")
 
     except Exception as e:
         st.error(f"分析異常：{e}")
-else:
-    st.info("💡 提示：點擊錄音後，請務必對著麥克風清晰發聲。手機端若播放無聲，請連點兩次播放鈕。")
 
-st.caption("© 2026 Heal Lab | v5.3 Audio Logic Fixed")
+st.caption("© 2026 Heal Lab | v5.5 Metadata Fixed")
